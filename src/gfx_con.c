@@ -8,6 +8,8 @@
  *
  */
 
+#include <stddef.h>
+
 #include <ogc/machine/processor.h>
 #include <ogc/usbgecko.h>
 
