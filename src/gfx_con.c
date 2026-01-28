@@ -8,11 +8,6 @@
  *
  */
 
-#include <stddef.h>
-
-#include <ogc/machine/processor.h>
-#include <ogc/usbgecko.h>
-
 #include "gfx.h"
 #include "gfx_con.h"
 
@@ -22,6 +17,8 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include <ogc/machine/processor.h>
+#include <ogc/usbgecko.h>
 #include <sys/iosupport.h>
 
 #define USBGECKO_CHANNEL 1
@@ -40,13 +37,9 @@
 extern unsigned int gfx_con_font_len;
 extern unsigned char gfx_con_font[];
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-static ssize_t _con_write(struct _reent *r, int fd, const char *ptr,
+static ssize_t _con_write(struct _reent *r, void *fd, const char *ptr,
 							size_t len);
-static ssize_t _con_read(struct _reent *r, int fd, char *ptr, size_t len);
+static ssize_t _con_read(struct _reent *r, void *fd, char *ptr, size_t len);
 
 static const devoptab_t _dt_stdio = {
 	"stdio",			// device name
@@ -72,8 +65,11 @@ static const devoptab_t _dt_stdio = {
 	NULL,				// device ftrunctate_r
 	NULL,				// device fsync_r
 	NULL,				// deviceData;
-	NULL,				// device chmod_r
-	NULL				// device fchmod_r
+	NULL,				// chmod_r
+	NULL,				// fchmod_r
+	NULL,				// rmdir_r
+	NULL,				// lstat_r
+	NULL,				// utimes_r
 };
 
 static const GXColor _con_colors[] = {
@@ -354,7 +350,7 @@ static size_t _con_esc(const char *ptr, size_t len) {
 	return ret;
 }
 
-static ssize_t _con_write(struct _reent *r, int fd, const char *ptr,
+static ssize_t _con_write(struct _reent *r, void *fd, const char *ptr,
 							size_t len) {
 	u32 level;
 	ssize_t ret = 0;
@@ -441,7 +437,7 @@ static ssize_t _con_write(struct _reent *r, int fd, const char *ptr,
 	return ret;
 }
 
-static ssize_t _con_read(struct _reent *r, int fd, char *ptr, size_t len) {
+static ssize_t _con_read(struct _reent *r, void *fd, char *ptr, size_t len) {
 	(void) r;
 	(void) fd;
 	(void) ptr;
@@ -451,6 +447,8 @@ static ssize_t _con_read(struct _reent *r, int fd, char *ptr, size_t len) {
 
 	return -EINVAL;
 }
+
+static devoptab_t const *_opts_backup[3];
 
 bool gfx_con_init(gfx_screen_coords_t *coords) {
 	static bool inited = false;
@@ -470,6 +468,12 @@ bool gfx_con_init(gfx_screen_coords_t *coords) {
 			gfx_tex_deinit(&_con.tex);
 			return false;
 		}
+
+		_CPU_ISR_Disable(level);
+		_opts_backup[0] = devoptab_list[STD_IN];
+		_opts_backup[1] = devoptab_list[STD_OUT];
+		_opts_backup[2] = devoptab_list[STD_ERR];
+		_CPU_ISR_Restore(level);
 
 		inited = true;
 	}
@@ -517,9 +521,9 @@ void gfx_con_deinit(void) {
 	u32 level;
 
 	_CPU_ISR_Disable(level);
-	devoptab_list[STD_IN] = NULL;
-	devoptab_list[STD_OUT] = NULL;
-	devoptab_list[STD_ERR] = NULL;
+	devoptab_list[STD_IN] = _opts_backup[0];
+	devoptab_list[STD_OUT] = _opts_backup[1];
+	devoptab_list[STD_ERR] = _opts_backup[2];
 
 	if (_con.usbgecko)
 		usb_sendbuffer(USBGECKO_CHANNEL, CON_COLRESET, strlen(CON_COLRESET));
@@ -601,8 +605,3 @@ void gfx_con_draw(void) {
 	gfx_set_colorop(COLOROP_NONE, gfx_color_none, gfx_color_none);
 	gfx_enable_viewport(vp);
 }
-
-#ifdef __cplusplus
-}
-#endif
-
